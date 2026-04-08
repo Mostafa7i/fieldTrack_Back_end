@@ -1,0 +1,64 @@
+# dependencies
+node_modules/
+
+# environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# build / output
+dist/
+build/
+coverage/
+
+# cache
+.cache/
+.npm/
+.eslintcache
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE / Editor
+.vscode/
+.idea/
+
+# temporary files
+tmp/
+temp/
+*.tmp
+
+
+# generated files
+*.pid
+*.seed
+*.pid.lock
+
+
+
+# Firebase
+.firebase/
+firebase-debug.log
+
+.next/
+vite.config.timestamp-*
+
+# database
+*.sqlite
+*.sqlite3
+
+# secrets / keys
+*.pem
+*.key
+serviceAccountKey.json
