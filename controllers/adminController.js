@@ -271,4 +271,51 @@ const getAttendanceSummary = async (req, res, next) => {
   }
 };
 
-module.exports = { getAnalytics, getAllUsers, toggleUserStatus, deleteUser, getCompanies, verifyCompany, assignSupervisor, getAllInternships, toggleInternshipStatus, getAllReports, getAttendanceSummary };
+// @desc    Get pending verification users (company/supervisor)
+// @route   GET /api/admin/pending
+// @access  Private (admin)
+const getPendingUsers = async (req, res, next) => {
+  try {
+    const users = await User.find({
+      isVerified: false,
+      isRejected: { $ne: true },
+      role: { $in: ['company', 'supervisor'] },
+    }).sort({ createdAt: -1 });
+    res.status(200).json({ success: true, count: users.length, data: users });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Verify (approve) a user account
+// @route   PUT /api/admin/users/:id/verify
+// @access  Private (admin)
+const verifyUser = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    user.isVerified = true;
+    await user.save({ validateBeforeSave: false });
+    res.status(200).json({ success: true, data: user, message: 'User verified and can now log in.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Reject user
+// @route   PUT /api/admin/users/:id/reject
+// @access  Private (Admin)
+const rejectUser = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    user.isRejected = true;
+    user.isVerified = false; // Ensure they remain unverified
+    await user.save({ validateBeforeSave: false });
+    res.status(200).json({ success: true, data: user, message: 'User rejected.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { getAnalytics, getAllUsers, toggleUserStatus, deleteUser, getCompanies, verifyCompany, assignSupervisor, getAllInternships, toggleInternshipStatus, getAllReports, getAttendanceSummary, getPendingUsers, verifyUser, rejectUser };

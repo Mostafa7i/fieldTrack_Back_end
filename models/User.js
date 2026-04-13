@@ -36,8 +36,25 @@ const UserSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    isVerified: {
+      type: Boolean,
+      default: false, 
+    },
+    isRejected: {
+      type: Boolean,
+      default: false,
+    },
     lastLogin: {
       type: Date,
+    },
+    // Working hours for supervisor checks
+    shiftStart: {
+      type: String,
+      default: '10:00',
+    },
+    shiftEnd: {
+      type: String,
+      default: '16:00',
     },
   },
   { timestamps: true }

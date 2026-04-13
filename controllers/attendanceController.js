@@ -2,9 +2,7 @@ const Attendance = require('../models/Attendance');
 const Student = require('../models/Student');
 const Application = require('../models/Application');
 
-// @desc    Student logs attendance
-// @route   POST /api/attendance
-// @access  Private (student)
+
 const logAttendance = async (req, res, next) => {
   try {
     const { internshipId, date, checkIn, checkOut, status, notes, hoursWorked } = req.body;
@@ -38,9 +36,94 @@ const logAttendance = async (req, res, next) => {
   }
 };
 
-// @desc    Get attendance records
-// @route   GET /api/attendance
-// @access  Private (student gets own; supervisor gets assigned students; admin gets all)
+// @desc    Auto log attendance via system time
+// @route   POST /api/attendance/auto
+// @access  Private (student)
+const autoLogAttendance = async (req, res, next) => {
+  try {
+    const { internshipId, action } = req.body; // action: 'checkIn' | 'checkOut'
+
+    const application = await Application.findOne({
+      student: req.user.id,
+      internship: internshipId,
+      status: 'accepted',
+    });
+    if (!application) return res.status(403).json({ success: false, message: 'Not enrolled in this internship' });
+
+    const now = new Date();
+    const attendanceDate = new Date(now);
+    attendanceDate.setHours(0, 0, 0, 0);
+
+    const hours = now.getHours().toString().padStart(2, '0');
+    const mins = now.getMinutes().toString().padStart(2, '0');
+    const currentTimeStr = `${hours}:${mins}`;
+
+    let attendance = await Attendance.findOne({ student: req.user.id, internship: internshipId, date: attendanceDate });
+
+    if (action === 'checkIn') {
+      if (attendance && attendance.checkIn) {
+        return res.status(400).json({ success: false, message: 'Already checked in today' });
+      }
+      
+      // Determine late status dynamically based on supervisor's settings (default 10:00 AM)
+      const studentProfile = await Student.findOne({ user: req.user.id }).populate('supervisor');
+      let shiftStartVal = 10 * 60; // Default 10:00 AM
+      
+      if (studentProfile?.supervisor?.shiftStart) {
+        const [h, m] = studentProfile.supervisor.shiftStart.split(':').map(Number);
+        if (!isNaN(h) && !isNaN(m)) shiftStartVal = h * 60 + m;
+      }
+
+      let status = 'present';
+      const timeVal = now.getHours() * 60 + now.getMinutes();
+      const gracePeriod = 15; // 15 mins
+      
+      if (timeVal > shiftStartVal + gracePeriod) {
+        status = 'late';
+      }
+
+      attendance = await Attendance.create({
+        student: req.user.id,
+        internship: internshipId,
+        date: attendanceDate,
+        checkIn: currentTimeStr,
+        status,
+        notes: 'Auto-logged by system',
+      });
+      return res.status(200).json({ success: true, data: attendance });
+    } 
+    
+    if (action === 'checkOut') {
+      if (!attendance || !attendance.checkIn) {
+        return res.status(400).json({ success: false, message: 'Must check in first' });
+      }
+      if (attendance.checkOut) {
+        return res.status(400).json({ success: false, message: 'Already checked out today' });
+      }
+
+      // Calculate hours worked
+      const [inH, inM] = attendance.checkIn.split(':').map(Number);
+      const startTotalMinutes = inH * 60 + inM;
+      const endTotalMinutes = now.getHours() * 60 + now.getMinutes();
+      // Ensure positive hours
+      const hoursWorked = Math.max(0, (endTotalMinutes - startTotalMinutes) / 60).toFixed(1);
+
+      attendance.checkOut = currentTimeStr;
+      attendance.hoursWorked = Number(hoursWorked);
+      await attendance.save();
+
+      return res.status(200).json({ success: true, data: attendance });
+    }
+
+    res.status(400).json({ success: false, message: 'Invalid action' });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ success: false, message: 'Attendance already logged for this date' });
+    }
+    next(error);
+  }
+};
+
 const getAttendance = async (req, res, next) => {
   try {
     let records;
@@ -99,9 +182,7 @@ const getAttendance = async (req, res, next) => {
   }
 };
 
-// @desc    Delete attendance record
-// @route   DELETE /api/attendance/:id
-// @access  Private (student, admin)
+
 const deleteAttendance = async (req, res, next) => {
   try {
     const record = await Attendance.findById(req.params.id);
@@ -116,4 +197,4 @@ const deleteAttendance = async (req, res, next) => {
   }
 };
 
-module.exports = { logAttendance, getAttendance, deleteAttendance };
+module.exports = { logAttendance, autoLogAttendance, getAttendance, deleteAttendance };

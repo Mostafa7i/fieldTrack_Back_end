@@ -2,9 +2,6 @@ const Evaluation = require('../models/Evaluation');
 const Application = require('../models/Application');
 const Notification = require('../models/Notification');
 
-// @desc    Create evaluation
-// @route   POST /api/evaluations
-// @access  Private (company)
 const createEvaluation = async (req, res, next) => {
   try {
     const { studentId, internshipId, applicationId, scores, comments, recommendation } = req.body;
@@ -37,9 +34,6 @@ const createEvaluation = async (req, res, next) => {
   }
 };
 
-// @desc    Get evaluations
-// @route   GET /api/evaluations
-// @access  Private
 const getEvaluations = async (req, res, next) => {
   try {
     let evaluations;
@@ -79,9 +73,6 @@ const getEvaluation = async (req, res, next) => {
   }
 };
 
-// @desc    Get leaderboard (Top students by evaluation score)
-// @route   GET /api/evaluations/leaderboard
-// @access  Private
 const getLeaderboard = async (req, res, next) => {
   try {
     const leaderboard = await Evaluation.aggregate([

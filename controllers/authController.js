@@ -14,6 +14,7 @@ const sendTokenResponse = (user, statusCode, res) => {
       email: user.email,
       role: user.role,
       avatar: user.avatar,
+      isVerified: user.isVerified,
     },
   });
 };
@@ -25,8 +26,9 @@ const register = async (req, res, next) => {
   try {
     const { name, email, password, role, companyName } = req.body;
 
-    // Create base user
-    const user = await User.create({ name, email, password, role: role || 'student' });
+    // Create base user — students & admins are auto-verified; company/supervisor must await approval
+    const autoVerified = !role || role === 'student' || role === 'admin';
+    const user = await User.create({ name, email, password, role: role || 'student', isVerified: autoVerified });
 
     // Create profile based on role
     if (role === 'student') {
@@ -38,11 +40,20 @@ const register = async (req, res, next) => {
       });
     }
 
-    // Update last login
-    user.lastLogin = Date.now();
-    await user.save({ validateBeforeSave: false });
+    // Update last login (only for instantly validated ones, though acceptable for all)
+    if (user.isVerified) {
+      user.lastLogin = Date.now();
+      await user.save({ validateBeforeSave: false });
+      return sendTokenResponse(user, 201, res);
+    }
 
-    sendTokenResponse(user, 201, res);
+    // Block unverified company/supervisor from logging in immediately
+    return res.status(201).json({
+      success: true,
+      code: 'PENDING_VERIFICATION',
+      message: 'Account created but needs admin approval.',
+      user: { name: user.name, email: user.email, role: user.role, isVerified: false },
+    });
   } catch (error) {
     next(error);
   }
@@ -66,6 +77,26 @@ const login = async (req, res, next) => {
 
     if (!user.isActive) {
       return res.status(401).json({ success: false, message: 'Account is deactivated. Contact admin.' });
+    }
+
+    // Block rejected requests
+    if (user.isRejected) {
+      return res.status(403).json({
+        success: false,
+        code: 'REJECTED_VERIFICATION',
+        message: 'Your account request was rejected by the admin.',
+        user: { name: user.name, email: user.email, role: user.role, isVerified: false, isRejected: true },
+      });
+    }
+
+    // Block unverified company/supervisor from logging in
+    if (!user.isVerified && (user.role === 'company' || user.role === 'supervisor')) {
+      return res.status(403).json({
+        success: false,
+        code: 'PENDING_VERIFICATION',
+        message: 'Your account is pending admin approval.',
+        user: { name: user.name, email: user.email, role: user.role, isVerified: false, isRejected: false },
+      });
     }
 
     const isMatch = await user.matchPassword(password);
@@ -108,6 +139,11 @@ const getMe = async (req, res, next) => {
 const updateProfile = async (req, res, next) => {
   try {
     const fieldsToUpdate = { name: req.body.name, avatar: req.body.avatar };
+    if (req.user.role === 'supervisor') {
+      if (req.body.shiftStart) fieldsToUpdate.shiftStart = req.body.shiftStart;
+      if (req.body.shiftEnd) fieldsToUpdate.shiftEnd = req.body.shiftEnd;
+    }
+
     const user = await User.findByIdAndUpdate(req.user.id, fieldsToUpdate, {
       new: true,
       runValidators: true,

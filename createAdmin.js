@@ -2,7 +2,7 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const mongoose = require('mongoose');
 const User = require('./models/User');
-
+// الصفحة فيها دالة استخدمناها عشان نكريت حساب الادمن لمرة واحده
 const createAdmin = async () => {
   try {
     await mongoose.connect(process.env.MONGODB_URI, {

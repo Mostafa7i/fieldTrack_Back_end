@@ -11,7 +11,10 @@ const {
   getAllInternships,
   toggleInternshipStatus,
   getAllReports,
-  getAttendanceSummary
+  getAttendanceSummary,
+  getPendingUsers,
+  verifyUser,
+  rejectUser,
 } = require('../controllers/adminController');
 const { protect, authorize } = require('../middleware/auth');
 
@@ -30,5 +33,8 @@ router.get('/internships', getAllInternships);
 router.put('/internships/:id/toggle', toggleInternshipStatus);
 router.get('/reports', getAllReports);
 router.get('/attendance', getAttendanceSummary);
+router.get('/pending', getPendingUsers);
+router.put('/users/:id/verify', verifyUser);
+router.put('/users/:id/reject', rejectUser);
 
 module.exports = router;

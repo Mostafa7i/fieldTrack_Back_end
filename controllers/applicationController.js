@@ -44,9 +44,6 @@ const applyForInternship = async (req, res, next) => {
   }
 };
 
-// @desc    Get applications (student sees their own; company sees applications to their internships)
-// @route   GET /api/applications
-// @access  Private
 const getApplications = async (req, res, next) => {
   try {
     let applications;
@@ -75,9 +72,6 @@ const getApplications = async (req, res, next) => {
   }
 };
 
-// @desc    Update application status (company only)
-// @route   PUT /api/applications/:id
-// @access  Private (company)
 const updateApplicationStatus = async (req, res, next) => {
   try {
     const { status, notes } = req.body;
@@ -112,9 +106,7 @@ const updateApplicationStatus = async (req, res, next) => {
   }
 };
 
-// @desc    Withdraw application (student)
-// @route   DELETE /api/applications/:id
-// @access  Private (student)
+
 const withdrawApplication = async (req, res, next) => {
   try {
     const application = await Application.findById(req.params.id);
