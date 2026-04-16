@@ -7,6 +7,89 @@ const TrainingReport = require('../models/TrainingReport');
 const Attendance = require('../models/Attendance');
 const Evaluation = require('../models/Evaluation');
 
+// @desc    Get all supervisors with their assigned students
+// @route   GET /api/admin/supervisors
+// @access  Private (admin)
+const getSupervisors = async (req, res, next) => {
+  try {
+    const supervisors = await User.find({ role: 'supervisor' }).sort({ createdAt: -1 });
+    
+    // For each supervisor, count assigned students
+    const supervisorData = await Promise.all(
+      supervisors.map(async (sup) => {
+        const assignedStudents = await Student.find({ supervisor: sup._id })
+          .populate('user', 'name email avatar');
+        return {
+          ...sup.toObject(),
+          assignedStudents,
+          studentCount: assignedStudents.length,
+        };
+      })
+    );
+    
+    res.status(200).json({ success: true, count: supervisorData.length, data: supervisorData });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get all students with their supervisor info
+// @route   GET /api/admin/students-supervisors
+// @access  Private (admin)
+const getStudentsWithSupervisors = async (req, res, next) => {
+  try {
+    const students = await Student.find()
+      .populate('user', 'name email avatar isActive isVerified')
+      .populate('supervisor', 'name email shiftStart shiftEnd isVerified')
+      .sort({ createdAt: -1 });
+    
+    res.status(200).json({ success: true, count: students.length, data: students });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Update supervisor shift hours
+// @route   PUT /api/admin/supervisors/:id/shift
+// @access  Private (admin)
+const updateSupervisorShift = async (req, res, next) => {
+  try {
+    const { shiftStart, shiftEnd } = req.body;
+    
+    const supervisor = await User.findOne({ _id: req.params.id, role: 'supervisor' });
+    if (!supervisor) {
+      return res.status(404).json({ success: false, message: 'Supervisor not found' });
+    }
+    
+    if (shiftStart) supervisor.shiftStart = shiftStart;
+    if (shiftEnd) supervisor.shiftEnd = shiftEnd;
+    await supervisor.save({ validateBeforeSave: false });
+    
+    res.status(200).json({ success: true, data: supervisor, message: 'Shift hours updated successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Remove supervisor from student
+// @route   PUT /api/admin/students/:userId/remove-supervisor
+// @access  Private (admin)
+const removeSupervisor = async (req, res, next) => {
+  try {
+    const studentProfile = await Student.findOneAndUpdate(
+      { user: req.params.userId },
+      { $unset: { supervisor: 1 } },
+      { new: true }
+    );
+    if (!studentProfile) {
+      return res.status(404).json({ success: false, message: 'Student profile not found' });
+    }
+    res.status(200).json({ success: true, message: 'Supervisor removed successfully', data: studentProfile });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // @desc    Admin analytics
 // @route   GET /api/admin/analytics
 // @access  Private (admin)
@@ -318,4 +401,4 @@ const rejectUser = async (req, res, next) => {
   }
 };
 
-module.exports = { getAnalytics, getAllUsers, toggleUserStatus, deleteUser, getCompanies, verifyCompany, assignSupervisor, getAllInternships, toggleInternshipStatus, getAllReports, getAttendanceSummary, getPendingUsers, verifyUser, rejectUser };
+module.exports = { getAnalytics, getAllUsers, toggleUserStatus, deleteUser, getCompanies, verifyCompany, assignSupervisor, getAllInternships, toggleInternshipStatus, getAllReports, getAttendanceSummary, getPendingUsers, verifyUser, rejectUser, getSupervisors, getStudentsWithSupervisors, updateSupervisorShift, removeSupervisor };

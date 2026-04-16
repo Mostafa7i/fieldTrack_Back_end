@@ -13,44 +13,62 @@ const StudentSchema = new mongoose.Schema(
       unique: true,
       sparse: true,
     },
-    university: {
+    university: { type: String, default: '' },
+    faculty:    { type: String, default: '' },
+    major:      { type: String, default: '' },
+    gpa:        { type: Number, min: 0, max: 5, default: 0 },
+    graduationYear: { type: Number },
+    skills:     [String],
+    bio:        { type: String, maxlength: 800 },
+    resume:     { type: String },
+    phone:      { type: String },
+    supervisor: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+
+    // ── Preferences (used by AI recommendations) ──────────────────────────
+    preferredCategories: {
+      type: [String],
+      default: [],
+      // e.g. ['IT', 'Engineering', 'Design']
+    },
+    preferredTypes: {
+      type: [String],
+      default: [],
+      // e.g. ['remote', 'hybrid', 'full-time']
+    },
+    preferredLocations: {
+      type: [String],
+      default: [],
+      // e.g. ['Cairo', 'Remote']
+    },
+    availableFrom: {
+      type: Date,
+    },
+    careerGoals: {
       type: String,
-      default: '',
+      maxlength: 600,
     },
-    faculty: {
-      type: String,
-      default: '',
+    languages: {
+      type: [String],   // e.g. ['Arabic', 'English']
+      default: [],
     },
-    major: {
-      type: String,
-      default: '',
+    hobbies: {
+      type: [String],
+      default: [],
     },
-    gpa: {
-      type: Number,
-      min: 0,
-      max: 4,
-      default: 0,
-    },
-    graduationYear: {
-      type: Number,
-    },
-    skills: [String],
-    bio: {
-      type: String,
-      maxlength: 500,
-    },
-    resume: {
-      type: String, // URL or file path
-    },
-    phone: {
-      type: String,
-    },
-    supervisor: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+
+    // ── Social / Links ─────────────────────────────────────────────────────
+    linkedIn:  { type: String, default: '' },
+    github:    { type: String, default: '' },
+    portfolio: { type: String, default: '' },
+
+    // ── Onboarding flag ────────────────────────────────────────────────────
+    profileCompleted: {
+      type: Boolean,
+      default: false,
     },
   },
   { timestamps: true }
 );
 
 module.exports = mongoose.model('Student', StudentSchema);
+

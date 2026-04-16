@@ -14,14 +14,27 @@ const applyForInternship = async (req, res, next) => {
     if (internship.status !== 'open') return res.status(400).json({ success: false, message: 'Internship is closed' });
 
     const existing = await Application.findOne({ student: req.user.id, internship: internshipId });
-    if (existing) return res.status(400).json({ success: false, message: 'Already applied to this internship' });
+    let application;
 
-    const application = await Application.create({
-      student: req.user.id,
-      internship: internshipId,
-      coverLetter,
-      resume,
-    });
+    if (existing) {
+      if (existing.status !== 'withdrawn') {
+        return res.status(400).json({ success: false, message: 'Already applied to this internship' });
+      }
+      
+      // Reactivate withdrawn application
+      existing.status = 'pending';
+      if (coverLetter !== undefined) existing.coverLetter = coverLetter;
+      if (resume !== undefined) existing.resume = resume;
+      await existing.save();
+      application = existing;
+    } else {
+      application = await Application.create({
+        student: req.user.id,
+        internship: internshipId,
+        coverLetter,
+        resume,
+      });
+    }
 
     // Increment application count
     await Internship.findByIdAndUpdate(internshipId, { $inc: { applicationsCount: 1 } });
@@ -47,24 +60,48 @@ const applyForInternship = async (req, res, next) => {
 const getApplications = async (req, res, next) => {
   try {
     let applications;
+    const Student = require('../models/Student');
     if (req.user.role === 'student') {
       applications = await Application.find({ student: req.user.id })
-        .populate('internship', 'title location type deadline status')
+        .populate('internship', 'title location type deadline status company companyProfile')
         .populate({ path: 'internship', populate: { path: 'companyProfile', select: 'companyName logo' } })
+        .populate({ path: 'internship', populate: { path: 'company', select: 'name' } })
         .sort({ createdAt: -1 });
     } else if (req.user.role === 'company') {
       const internships = await Internship.find({ company: req.user.id }).select('_id');
       const ids = internships.map((i) => i._id);
-      applications = await Application.find({ internship: { $in: ids } })
+      let apps = await Application.find({ internship: { $in: ids } })
         .populate('student', 'name email avatar')
         .populate('internship', 'title')
-        .sort({ createdAt: -1 });
+        .sort({ createdAt: -1 })
+        .lean();
+        
+      for (let app of apps) {
+        if (app.student && app.student._id) {
+          const profile = await Student.findOne({ user: app.student._id }).lean();
+          if (profile) {
+            app.student = { ...app.student, ...profile };
+          }
+        }
+      }
+      applications = apps;
     } else if (req.user.role === 'supervisor' || req.user.role === 'admin') {
-      applications = await Application.find()
+      let apps = await Application.find()
         .populate('student', 'name email')
         .populate('internship', 'title company')
         .sort({ createdAt: -1 })
-        .limit(100);
+        .limit(100)
+        .lean();
+        
+      for (let app of apps) {
+        if (app.student && app.student._id) {
+          const profile = await Student.findOne({ user: app.student._id }).lean();
+          if (profile) {
+            app.student = { ...app.student, ...profile };
+          }
+        }
+      }
+      applications = apps;
     }
     res.status(200).json({ success: true, count: applications.length, data: applications });
   } catch (error) {
@@ -114,6 +151,10 @@ const withdrawApplication = async (req, res, next) => {
     if (application.student.toString() !== req.user.id) return res.status(403).json({ success: false, message: 'Not authorized' });
     application.status = 'withdrawn';
     await application.save();
+
+    // Decrement application count
+    await Internship.findByIdAndUpdate(application.internship, { $inc: { applicationsCount: -1 } });
+
     res.status(200).json({ success: true, message: 'Application withdrawn' });
   } catch (error) {
     next(error);

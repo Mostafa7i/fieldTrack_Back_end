@@ -571,43 +571,194 @@ exports.evaluateApplicant = async (req, res) => {
   try {
     const { applicationId } = req.params;
     const application = await Application.findById(applicationId)
-      .populate({ path: 'student', populate: { path: 'user', select: 'name email' } })
+      .populate('student', 'name email')
       .populate('internship');
 
     if (!application) return res.status(404).json({ message: 'Application not found' });
+    
+    // Check if student user was deleted
+    if (!application.student || !application.student._id) {
+       return res.status(404).json({ message: 'Student account was deleted or not found' });
+    }
+
     const studentCustomData = await Student.findOne({ user: application.student._id });
     if (!studentCustomData) return res.status(404).json({ message: 'Student details not found' });
 
     const internshipDetails = application.internship;
+    if (!internshipDetails) return res.status(404).json({ message: 'Internship details not found' });
+
     const prompt = `You are an expert HR AI evaluator for an internship portal.
 Evaluate how well this student matches the internship requirements.
 
-Internship: ${internshipDetails.title}
-Description: ${internshipDetails.description}
-Requirements: ${internshipDetails.requirements}
-Skills: ${internshipDetails.skills.join(', ')}
+Internship: ${internshipDetails.title || 'Untitled'}
+Description: ${internshipDetails.description || ''}
+Requirements: ${internshipDetails.requirements || ''}
+Skills: ${(internshipDetails.skills || []).join(', ')}
 
-Student Major: ${studentCustomData.major} / ${studentCustomData.faculty}
-GPA: ${studentCustomData.gpa}
-Skills: ${studentCustomData.skills.join(', ')}
-Bio: ${studentCustomData.bio}
+Student Major: ${studentCustomData.major || 'Not provided'} / ${studentCustomData.faculty || 'Not provided'}
+GPA: ${studentCustomData.gpa || 'Not provided'}
+Skills: ${(studentCustomData.skills || []).join(', ')}
+Bio: ${studentCustomData.bio || 'Not provided'}
 
 Respond ONLY with raw JSON (no markdown):
 {"matchScore":<0-100>,"strengths":["..."],"weaknesses":["..."],"recommendation":"..."}`;
 
-    const aiResultText = await generateContent([{ role: 'user', parts: [{ text: prompt }] }]);
-    const cleanText = aiResultText.trim().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    try {
+      const aiResultText = await generateContent([{ role: 'user', parts: [{ text: prompt }] }]);
+      const cleanText = aiResultText.trim().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
-    let parsedResult;
-    try { parsedResult = JSON.parse(cleanText); }
-    catch { return res.status(500).json({ message: 'Failed to generate a readable AI evaluation.' }); }
+      let parsedResult;
+      try { parsedResult = JSON.parse(cleanText); }
+      catch { throw new Error('JSON_PARSE_FAIL'); }
 
-    res.json(parsedResult);
+      return res.json({ ...parsedResult, source: 'ai' });
+    } catch (apiError) {
+      console.warn(`[AI Evaluate] API failed (${apiError.message}), using local evaluation fallback.`);
+
+      const studentSkillsArr = studentCustomData.skills || [];
+      const internSkillsArr = internshipDetails.skills || [];
+
+      const studentSkills = studentSkillsArr.map(s => (s || '').toString().toLowerCase());
+      const internSkills = internSkillsArr.map(s => (s || '').toString().toLowerCase());
+
+      const matchedSkills = internSkills.filter(sk => studentSkills.some(ss => ss.includes(sk) || sk.includes(ss)));
+      const missingSkills = internSkills.filter(sk => !studentSkills.some(ss => ss.includes(sk) || sk.includes(ss)));
+
+      let matchScore = 0;
+      if (internSkills.length > 0) {
+         matchScore += Math.round((matchedSkills.length / internSkills.length) * 80);
+      } else {
+         matchScore += 60; // Base score if no specific skills required
+      }
+      
+      const gpa = Number(studentCustomData.gpa) || 0;
+      if (gpa > 0) {
+         matchScore += Math.round((gpa / 4) * 20); // GPA bonus up to 20 pts
+      } else {
+         matchScore += 10;
+      }
+
+      matchScore = Math.min(matchScore, 100);
+
+      const isAr = req.query.locale === 'ar';
+      const strengths = [];
+      const weaknesses = [];
+
+      if (matchedSkills.length > 0) strengths.push(isAr ? `يمتلك المهارات المطلوبة: ${matchedSkills.join('، ')}` : `Possesses required skills: ${matchedSkills.join(', ')}`);
+      if (gpa >= 3.0) strengths.push(isAr ? `أداء أكاديمي قوي (المعدل: ${gpa})` : `Strong academic performance (GPA: ${gpa})`);
+      if (studentCustomData.major) strengths.push(isAr ? `خلفية دراسية مناسبة في: ${studentCustomData.major}` : `Relevant background in ${studentCustomData.major}`);
+
+      if (missingSkills.length > 0) weaknesses.push(isAr ? `يفتقر لبعض المهارات الأساسية: ${missingSkills.slice(0, 3).join('، ')}` : `Missing key skills: ${missingSkills.slice(0, 3).join(', ')}`);
+      if (studentSkillsArr.length === 0) weaknesses.push(isAr ? `المرشح لم يقم بتحديد أي مهارات في ملفه الشخصي` : `Candidate has not provided any skills in their profile`);
+
+      let recommendation;
+      if (matchScore >= 75) recommendation = isAr ? 'يوصى به بشدة للمقابلة (Highly Recommended)' : 'Highly Recommended for Interview';
+      else if (matchScore >= 50) recommendation = isAr ? 'مرشح محتمل، يتطلب المراجعة (Potential)' : 'Potential candidate, requires review';
+      else recommendation = isAr ? 'لا يطابق المتطلبات الأساسية للفرصة' : 'Does not meet core requirements';
+
+      if (strengths.length === 0) strengths.push(isAr ? 'لم يتم التعرف على نقاط قوة واضحة من البيانات المتاحة.' : 'No obvious strengths identified from limited profile data.');
+      if (weaknesses.length === 0) weaknesses.push(isAr ? 'لم يتم تحديد نقاط ضعف رئيسية صريحة.' : 'No major weaknesses identified.');
+
+      return res.json({
+        matchScore,
+        strengths,
+        weaknesses,
+        recommendation,
+        source: 'local'
+      });
+    }
   } catch (error) {
     console.error(`[AI Evaluate] ${error.message}`);
     const { status, message } = translateError(error);
     res.status(status).json({ message });
   }
+};
+
+// ─── Local Matching Algorithm (guaranteed fallback, no API needed) ─────────────
+const scoreInternship = (internship, student) => {
+  let score = 0;
+
+  const studentSkills  = (student.skills  || []).map(s => s.toLowerCase());
+  const internSkills   = (internship.skills || []).map(s => s.toLowerCase());
+  const prefCategories = (student.preferredCategories || []).map(s => s.toLowerCase());
+  const prefTypes      = (student.preferredTypes      || []).map(s => s.toLowerCase());
+  const prefLocations  = (student.preferredLocations  || []).map(s => s.toLowerCase());
+
+  // 1. Skill overlap (up to 45 pts)
+  const matched = internSkills.filter(sk => studentSkills.some(ss => ss.includes(sk) || sk.includes(ss)));
+  if (internSkills.length > 0) {
+    score += Math.round((matched.length / internSkills.length) * 45);
+  }
+
+  // 2. Preferred category match (20 pts)
+  if (prefCategories.length > 0 && internship.category &&
+      prefCategories.some(c => internship.category.toLowerCase().includes(c))) {
+    score += 20;
+  } else if (prefCategories.length === 0) {
+    score += 10; // No preference → neutral bonus
+  }
+
+  // 3. Preferred work type match (15 pts)
+  if (prefTypes.length > 0 && internship.type &&
+      prefTypes.includes(internship.type.toLowerCase())) {
+    score += 15;
+  } else if (prefTypes.length === 0) {
+    score += 7;
+  }
+
+  // 4. Location match (10 pts)
+  if (prefLocations.length > 0 && internship.location) {
+    const loc = internship.location.toLowerCase();
+    if (prefLocations.some(pl => loc.includes(pl) || pl.includes('remote'))) {
+      score += 10;
+    }
+  } else {
+    score += 5;
+  }
+
+  // 5. GPA bonus (up to 10 pts) — higher GPA gets higher score
+  if (student.gpa) {
+    score += Math.round((student.gpa / 4) * 10);
+  }
+
+  return Math.min(score, 100);
+};
+
+const buildLocalReasoning = (internship, student, score, locale) => {
+  const isAr = locale === 'ar';
+  const studentSkills = (student.skills || []).map(s => s.toLowerCase());
+  const internSkills  = (internship.skills || []).map(s => s.toLowerCase());
+  const matched = internSkills.filter(sk => studentSkills.some(ss => ss.includes(sk) || sk.includes(ss)));
+
+  const parts = [];
+
+  if (matched.length > 0) {
+    parts.push(isAr
+      ? `${matched.length > 1 ? `مهاراتك في ${matched.slice(0, 2).join(' و')} تتوافق مع متطلبات هذه الفرصة` : `مهارتك في "${matched[0]}" مطلوبة هنا`}.`
+      : `Your skills in ${matched.slice(0, 2).join(' and ')} match this role's requirements.`);
+  }
+
+  const prefCats = (student.preferredCategories || []).map(s => s.toLowerCase());
+  if (prefCats.length > 0 && internship.category && prefCats.some(c => internship.category.toLowerCase().includes(c))) {
+    parts.push(isAr
+      ? `هذه الفرصة في مجال ${internship.category} الذي تفضله.`
+      : `This is in ${internship.category}, one of your preferred categories.`);
+  }
+
+  const prefTypes = (student.preferredTypes || []).map(s => s.toLowerCase());
+  if (prefTypes.length > 0 && internship.type && prefTypes.includes(internship.type.toLowerCase())) {
+    parts.push(isAr
+      ? `نوع العمل (${internship.type}) يتوافق مع تفضيلاتك.`
+      : `The work type (${internship.type}) matches your preferences.`);
+  }
+
+  if (score >= 70) {
+    parts.push(isAr ? 'توافق قوي مع ملفك الشخصي.' : 'Strong overall match with your profile.');
+  }
+
+  return parts.length > 0
+    ? parts.join(' ')
+    : (isAr ? 'فرصة جيدة تناسب ملفك الشخصي.' : 'A good opportunity matching your profile.');
 };
 
 // ─── 4. Internship Recommendations ────────────────────────────────────────────
@@ -619,31 +770,95 @@ exports.recommendInternships = async (req, res) => {
     const student = await Student.findOne({ user: studentId });
     if (!student) return res.status(404).json({ message: 'Student profile not found' });
 
-    const openInternships = await Internship.find({ status: 'open' }).limit(30);
+    const openInternships = await Internship.find({ status: 'open' }).limit(40);
     if (openInternships.length === 0) return res.json([]);
 
-    const miniInternships = openInternships.map(i => ({ id: i._id, title: i.title, skills: i.skills, category: i.category }));
+    // ── Try Gemini AI first ────────────────────────────────────────────────────
+    const miniInternships = openInternships.map(i => ({
+      id: i._id,
+      title: i.title,
+      skills: i.skills,
+      category: i.category,
+      type: i.type,
+      location: i.location,
+      isPaid: i.isPaid,
+    }));
 
-    const prompt = `You are an AI career advisor. Pick the top 5 most suitable internships for this student.
-Student: Major: ${student.major}, Skills: ${student.skills.join(', ')}
-Internships: ${JSON.stringify(miniInternships)}
-Respond ONLY with raw JSON array: [{"internshipId":"<id>","reasoning":"<1 sentence in ${locale === 'ar' ? 'ARABIC' : 'ENGLISH'}>"}]`;
+    const prompt = `You are an AI career advisor specializing in internship matching.
+Pick the top 5 most suitable internships for this student based on ALL available data.
 
-    const aiResultText = await generateContent([{ role: 'user', parts: [{ text: prompt }] }]);
-    const cleanText = aiResultText.trim().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+STUDENT PROFILE:
+- Major / Faculty: ${student.major} / ${student.faculty}
+- University: ${student.university}
+- GPA: ${student.gpa}
+- Skills: ${(student.skills || []).join(', ') || 'Not specified'}
+- Languages: ${(student.languages || []).join(', ') || 'Not specified'}
+- Career Goals: ${student.careerGoals || 'Not specified'}
+- Bio: ${student.bio || 'Not specified'}
 
-    let recommendedList;
-    try { recommendedList = JSON.parse(cleanText); }
-    catch { return res.status(500).json({ message: 'Failed to process recommendations' }); }
+STUDENT PREFERENCES:
+- Preferred Categories: ${(student.preferredCategories || []).join(', ') || 'Any'}
+- Preferred Work Types: ${(student.preferredTypes || []).join(', ') || 'Any'}
+- Preferred Locations: ${(student.preferredLocations || []).join(', ') || 'Any'}
+- Available From: ${student.availableFrom ? new Date(student.availableFrom).toLocaleDateString() : 'Immediately'}
 
-    const finalRecommendations = recommendedList
-      .map(rec => ({ ...rec, internshipDetails: openInternships.find(i => i._id.toString() === rec.internshipId) }))
-      .filter(rec => rec.internshipDetails);
+AVAILABLE INTERNSHIPS:
+${JSON.stringify(miniInternships)}
 
-    res.json(finalRecommendations);
+INSTRUCTIONS:
+- Prioritize internships matching the student's preferred categories, types, and locations.
+- Then match by skills alignment and career goals.
+- Respond ONLY with raw JSON array (no markdown, no extra text):
+[{"internshipId":"<id>","reasoning":"<1-2 sentences in ${locale === 'ar' ? 'ARABIC' : 'ENGLISH'} explaining why this is a great fit>"}]`;
+
+    try {
+      const aiResultText = await generateContent([{ role: 'user', parts: [{ text: prompt }] }]);
+      const cleanText = aiResultText.trim().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+
+      let recommendedList;
+      try { recommendedList = JSON.parse(cleanText); }
+      catch { throw new Error('JSON_PARSE_FAIL'); }
+
+      const finalRecommendations = recommendedList
+        .map(rec => ({ ...rec, internshipDetails: openInternships.find(i => i._id.toString() === rec.internshipId), source: 'ai' }))
+        .filter(rec => rec.internshipDetails)
+        .slice(0, 5);
+
+      if (finalRecommendations.length > 0) {
+        console.log('[AI Recommendations] Served by Gemini API ✓');
+        return res.json(finalRecommendations);
+      }
+      // If AI returned empty, fall through to local
+      throw new Error('AI_EMPTY_RESULT');
+
+    } catch (apiError) {
+      // ── Local matching fallback (always works) ─────────────────────────────
+      console.warn(`[AI Recommendations] API failed (${apiError.message}), using local matching algorithm.`);
+
+      const scored = openInternships.map(internship => ({
+        internship,
+        score: scoreInternship(internship, student),
+      }));
+
+      const top5 = scored
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5);
+
+      const localRecommendations = top5.map(({ internship, score }) => ({
+        internshipId: internship._id.toString(),
+        reasoning: buildLocalReasoning(internship, student, score, locale),
+        matchScore: score,
+        internshipDetails: internship,
+        source: 'local',
+      }));
+
+      console.log('[AI Recommendations] Served by local matching algorithm ✓');
+      return res.json(localRecommendations);
+    }
+
   } catch (error) {
-    console.error(`[AI Recommendations] ${error.message}`);
-    const { status, message } = translateError(error);
-    res.status(status).json({ message });
+    console.error(`[AI Recommendations] Fatal: ${error.message}`);
+    res.status(500).json({ message: 'Failed to generate recommendations. Please try again.' });
   }
 };
+

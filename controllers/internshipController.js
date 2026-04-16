@@ -125,4 +125,26 @@ const getMyInternships = async (req, res, next) => {
   }
 };
 
-module.exports = { getInternships, getInternship, createInternship, updateInternship, deleteInternship, getMyInternships };
+// @desc    Toggle internship status (open/closed)
+// @route   PUT /api/internships/:id/toggle
+// @access  Private (company owner)
+const toggleInternship = async (req, res, next) => {
+  try {
+    const internship = await Internship.findById(req.params.id);
+    if (!internship) {
+      return res.status(404).json({ success: false, message: 'Internship not found' });
+    }
+    if (internship.company.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized to toggle this internship' });
+    }
+    
+    internship.status = internship.status === 'open' ? 'closed' : 'open';
+    await internship.save();
+    
+    res.status(200).json({ success: true, data: internship });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { getInternships, getInternship, createInternship, updateInternship, deleteInternship, getMyInternships, toggleInternship };

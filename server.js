@@ -20,6 +20,7 @@ const adminRoutes = require('./routes/adminRoutes');
 const attendanceRoutes = require('./routes/attendanceRoutes');
 const aiRoutes = require('./routes/ai');
 const taskRoutes = require('./routes/taskRoutes');
+const studentRoutes = require('./routes/studentRoutes');
 
 // Connect to database
 connectDB();
@@ -53,6 +54,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/tasks', taskRoutes);
+app.use('/api/students', studentRoutes);
 
 // 404 handler
 app.use((req, res) => {

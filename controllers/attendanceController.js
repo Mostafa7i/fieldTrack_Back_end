@@ -1,6 +1,7 @@
 const Attendance = require('../models/Attendance');
 const Student = require('../models/Student');
 const Application = require('../models/Application');
+const User = require('../models/User');
 
 
 const logAttendance = async (req, res, next) => {
@@ -197,4 +198,39 @@ const deleteAttendance = async (req, res, next) => {
   }
 };
 
-module.exports = { logAttendance, autoLogAttendance, getAttendance, deleteAttendance };
+// @desc    Get supervisor shift hours for current student
+// @route   GET /api/attendance/shift-info
+// @access  Private (student)
+const getShiftInfo = async (req, res, next) => {
+  try {
+    const studentProfile = await Student.findOne({ user: req.user.id }).populate('supervisor', 'name shiftStart shiftEnd');
+    
+    if (!studentProfile || !studentProfile.supervisor) {
+      // Return defaults if no supervisor assigned
+      return res.status(200).json({
+        success: true,
+        data: {
+          supervisorName: null,
+          shiftStart: '09:00',
+          shiftEnd: '17:00',
+          hasSupervisor: false,
+        },
+      });
+    }
+    
+    const sup = studentProfile.supervisor;
+    res.status(200).json({
+      success: true,
+      data: {
+        supervisorName: sup.name,
+        shiftStart: sup.shiftStart || '09:00',
+        shiftEnd: sup.shiftEnd || '17:00',
+        hasSupervisor: true,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { logAttendance, autoLogAttendance, getAttendance, deleteAttendance, getShiftInfo };
